@@ -35,31 +35,36 @@ import org.apache.iceberg.exceptions.ValidationException;
 public interface StreamingUpdate extends SnapshotUpdate<StreamingUpdate> {
 
   /**
-   * Add a new data file to a specific. All files in this batch will receive the same data sequence
-   * number.
+   * Start a new batch of changes. The changes in this batch will have a sequence number larger than
+   * the changes in the previous batches.
    *
-   * <p>This rewrite operation may change the size or layout of the data files. When applicable, it
-   * is also recommended to discard already deleted records while rewriting data files. However, the
-   * set of live data records must never change.
-   *
-   * @param dataFile a new data file
-   * @param batchOrdinal The batch ordinal to associate with this data file
    * @return this for method chaining
    */
-  default StreamingUpdate addFile(DataFile dataFile, int batchOrdinal) {
+  default StreamingUpdate newBatch() {
+    throw new UnsupportedOperationException(
+        this.getClass().getName() + " does not implement newBatch");
+  }
+
+  /**
+   * Add a new data file to the current batch. All files in this batch will receive the same data
+   * sequence number.
+   *
+   * @param dataFile a new data file
+   * @return this for method chaining
+   */
+  default StreamingUpdate addFile(DataFile dataFile) {
     throw new UnsupportedOperationException(
         this.getClass().getName() + " does not implement addFile");
   }
 
   /**
-   * Add a new delete file to a specific batch. All files in this batch will receive the same data
+   * Add a new delete file to the current batch. All files in this batch will receive the same data
    * sequence number.
    *
    * @param deleteFile a new delete file
-   * @param batchOrdinal The batch ordinal to associate with this data file
    * @return this for method chaining
    */
-  default StreamingUpdate addFile(DeleteFile deleteFile, int batchOrdinal) {
+  default StreamingUpdate addFile(DeleteFile deleteFile) {
     throw new UnsupportedOperationException(
         this.getClass().getName() + " does not implement addFile");
   }

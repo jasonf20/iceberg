@@ -18,10 +18,8 @@
  */
 package org.apache.iceberg;
 
-import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
-import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 
 class BaseStreamingUpdate extends MergingSnapshotProducer<StreamingUpdate>
@@ -53,8 +51,6 @@ class BaseStreamingUpdate extends MergingSnapshotProducer<StreamingUpdate>
     // the same amount.
     // Otherwise, we will end up with data files with a sequence number larger than the snapshot
     // sequence number.
-    // The validate method ensures we can use `.size()` here since it validates that there are no
-    // gaps and that we start at 0.
     return super.nextSnapshotSequenceNumber(base) + batches.size() - 1;
   }
 
@@ -62,11 +58,13 @@ class BaseStreamingUpdate extends MergingSnapshotProducer<StreamingUpdate>
   public List<ManifestFile> apply(TableMetadata base, Snapshot snapshot) {
     if (requiresApply && !batches.isEmpty()) {
       long startingSequenceNumber = base.nextSequenceNumber();
-      batches.sort(Comparator.comparingInt(o -> o.ordinal));
-      for (Batch batch : batches) {
-        long dataSequenceNumber = startingSequenceNumber + batch.ordinal;
-        batch.newDataFiles.forEach(f -> add(f, dataSequenceNumber));
-        batch.newDeleteFiles.forEach(f -> add(f, dataSequenceNumber));
+      int i = 0;
+      while (i < batches.size()) {
+        Batch batch = batches.get(i);
+        long dataSequenceNumber = startingSequenceNumber + i;
+        batch.getNewDataFiles().forEach(f -> add(f, dataSequenceNumber));
+        batch.getNewDeleteFiles().forEach(f -> add(f, dataSequenceNumber));
+        i += 1;
       }
       requiresApply = false;
     }
@@ -74,29 +72,32 @@ class BaseStreamingUpdate extends MergingSnapshotProducer<StreamingUpdate>
   }
 
   @Override
-  public StreamingUpdate addFile(DataFile dataFile, int batchOrdinal) {
-    getBatch(batchOrdinal).add(dataFile);
+  public StreamingUpdate newBatch() {
+    if (batches.isEmpty() || !batches.get(batches.size() - 1).isEmpty()) {
+      // Only add a new batch if the there isn't one or there is one, and it's not empty
+      // Otherwise, we will have empty batches.
+      batches.add(new Batch());
+    }
     return this;
   }
 
   @Override
-  public StreamingUpdate addFile(DeleteFile deleteFile, int batchOrdinal) {
-    getBatch(batchOrdinal).add(deleteFile);
+  public StreamingUpdate addFile(DataFile dataFile) {
+    getBatch().add(dataFile);
     return this;
   }
 
-  private Batch getBatch(int batchOrdinal) {
-    Batch batch;
-    if (batches.size() - 1 < batchOrdinal) {
-      if (batchOrdinal > batches.size()) {
-        throw new IllegalArgumentException("Batches must be added in order");
-      }
-      batch = new Batch(batchOrdinal);
-      batches.add(batch);
-    } else {
-      batch = batches.get(batchOrdinal);
+  @Override
+  public StreamingUpdate addFile(DeleteFile deleteFile) {
+    getBatch().add(deleteFile);
+    return this;
+  }
+
+  private Batch getBatch() {
+    if (batches.isEmpty()) {
+      newBatch();
     }
-    return batch;
+    return batches.get(batches.size() - 1);
   }
 
   @Override
@@ -113,57 +114,31 @@ class BaseStreamingUpdate extends MergingSnapshotProducer<StreamingUpdate>
     super.cleanUncommitted(committed);
   }
 
-  @Override
-  protected void validate(TableMetadata currentMetadata, Snapshot snapshot) {
-    if (!batches.isEmpty()) {
-      int minOrdinal = batches.stream().mapToInt(Batch::getOrdinal).min().getAsInt();
-      ValidationException.check(
-          minOrdinal == 0, "Batches must start at ordinal 0. Current min ordinal: %d", minOrdinal);
-
-      int maxOrdinal = batches.stream().mapToInt(Batch::getOrdinal).max().getAsInt();
-
-      ValidationException.check(
-          maxOrdinal - minOrdinal == batches.size() - 1,
-          "Batches must be sequential with no gaps. Current min ordinal: %d current max ordinal: %d with %d batches",
-          minOrdinal,
-          maxOrdinal,
-          batches.size());
-    }
-    super.validate(currentMetadata, snapshot);
-  }
-
   private static class Batch {
     private final List<DataFile> newDataFiles = Lists.newArrayList();
     private final List<DeleteFile> newDeleteFiles = Lists.newArrayList();
-    private final int ordinal;
 
-    /**
-     * Creates a new set of updates to a specific batch
-     *
-     * @param ordinal the batch ordinal
-     */
-    Batch(int ordinal) {
-      this.ordinal = ordinal;
-    }
+    /** Creates a new set of updates to a specific batch */
+    Batch() {}
 
-    public void add(DataFile dataFile) {
+    void add(DataFile dataFile) {
       newDataFiles.add(dataFile);
     }
 
-    public void add(DeleteFile deleteFile) {
+    void add(DeleteFile deleteFile) {
       newDeleteFiles.add(deleteFile);
     }
 
-    public List<DataFile> getNewDataFiles() {
+    List<DataFile> getNewDataFiles() {
       return newDataFiles;
     }
 
-    public List<DeleteFile> getNewDeleteFiles() {
+    List<DeleteFile> getNewDeleteFiles() {
       return newDeleteFiles;
     }
 
-    public int getOrdinal() {
-      return ordinal;
+    boolean isEmpty() {
+      return newDataFiles.isEmpty() && newDeleteFiles.isEmpty();
     }
   }
 }

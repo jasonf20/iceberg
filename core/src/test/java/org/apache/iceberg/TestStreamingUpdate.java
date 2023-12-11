@@ -51,13 +51,18 @@ public class TestStreamingUpdate extends TableTestBase {
   public void testAddBatches() {
     Assert.assertEquals("Table should start empty", 0, listManifestFiles().size());
 
-    StreamingUpdate streamingUpdate = table.newStreamingUpdate();
-    streamingUpdate.addFile(FILE_A, 0);
-    streamingUpdate.addFile(FILE_A_DELETES, 0);
-    streamingUpdate.addFile(FILE_A2, 0);
-    streamingUpdate.addFile(FILE_B, 1);
-    streamingUpdate.addFile(FILE_C, 2);
-    streamingUpdate.addFile(FILE_C2_DELETES, 2);
+    StreamingUpdate streamingUpdate =
+        table
+            .newStreamingUpdate()
+            .addFile(FILE_A)
+            .addFile(FILE_A_DELETES)
+            .addFile(FILE_A2)
+            .newBatch()
+            .newBatch() // Extra call to new batch shouldn't mess things up
+            .addFile(FILE_B)
+            .newBatch()
+            .addFile(FILE_C)
+            .addFile(FILE_C2_DELETES);
 
     commit(table, streamingUpdate, branch);
 
@@ -94,8 +99,8 @@ public class TestStreamingUpdate extends TableTestBase {
     table.ops().failCommits(5);
 
     StreamingUpdate streamingUpdate = table.newStreamingUpdate();
-    streamingUpdate.addFile(FILE_A, 0);
-    streamingUpdate.addFile(FILE_A_DELETES, 0);
+    streamingUpdate.addFile(FILE_A);
+    streamingUpdate.addFile(FILE_A_DELETES);
 
     Snapshot pending = apply(streamingUpdate, branch);
 
@@ -120,7 +125,7 @@ public class TestStreamingUpdate extends TableTestBase {
     table.ops().failCommits(3);
 
     StreamingUpdate streamingUpdate =
-        table.newStreamingUpdate().addFile(FILE_A, 0).addFile(FILE_A_DELETES, 0);
+        table.newStreamingUpdate().addFile(FILE_A).addFile(FILE_A_DELETES);
     Snapshot pending = apply(streamingUpdate, branch);
 
     Assert.assertEquals("Should produce 2 manifests", 2, pending.allManifests(table.io()).size());
@@ -152,29 +157,5 @@ public class TestStreamingUpdate extends TableTestBase {
 
     // 1 for data file 1 for delete file
     Assert.assertEquals("Only 2 manifests should exist", 2, listManifestFiles().size());
-  }
-
-  @Test
-  public void testNonSequentialOrdinalsFails() {
-    Assert.assertEquals("Table should start empty", 0, listManifestFiles().size());
-
-    Assertions.assertThatThrownBy(
-            () ->
-                commit(
-                    table,
-                    table.newStreamingUpdate().addFile(FILE_A, 0).addFile(FILE_B, 3),
-                    branch))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Batches must be added in order");
-  }
-
-  @Test
-  public void testInitialBatchNon0Fails() {
-    Assert.assertEquals("Table should start empty", 0, listManifestFiles().size());
-
-    Assertions.assertThatThrownBy(
-            () -> commit(table, table.newStreamingUpdate().addFile(FILE_A, 5), branch))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Batches must be added in order");
   }
 }
